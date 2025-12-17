@@ -1,14 +1,14 @@
 # utils/operate_mysql.py
 import pymysql
 from pymysql.cursors import DictCursor
-from DBUtils.PooledDB import PooledDB
+from dbutils.pooled_db import PooledDB
 
 # 数据库配置（需根据实际环境修改）
 DB_CONFIG = {
     'host': 'localhost',
     'port': 3306,
     'user': 'root',
-    'password': 'your_password',
+    'password': 'ypXZQGkKg0mp4gdQ',
     'database': 'battle_net',
     'charset': 'utf8mb4',
     'maxconnections': 10  # 连接池最大连接数
