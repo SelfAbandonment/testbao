@@ -1,45 +1,69 @@
 # utils/operate_mysql.py
+import os
+from contextlib import contextmanager
+from typing import Any, Dict, List
+
 import pymysql
-from pymysql.cursors import DictCursor
 from dbutils.pooled_db import PooledDB
+from pymysql.cursors import DictCursor
 
-# 数据库配置（需根据实际环境修改）
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': 'ypXZQGkKg0mp4gdQ',
-    'database': 'battle_net',
-    'charset': 'utf8mb4',
-    'maxconnections': 10  # 连接池最大连接数
-}
 
-# 创建连接池
-pool = PooledDB(
-    creator=pymysql,
-    cursorclass=DictCursor,
-    **DB_CONFIG
-)
+def _load_db_config() -> Dict[str, Any]:
+    return {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'port': int(os.getenv('DB_PORT', '3306')),
+        'user': os.getenv('DB_USER', 'root'),
+        'password': os.getenv('DB_PASSWORD', 'ypXZQGkKg0mp4gdQ'),
+        'database': os.getenv('DB_NAME', 'battle_net'),
+        'charset': os.getenv('DB_CHARSET', 'utf8mb4'),
+        'maxconnections': int(os.getenv('DB_MAX_CONNECTIONS', '10')),
+        'cursorclass': DictCursor,
+    }
 
-# 获取连接
+
+pool = PooledDB(creator=pymysql, **_load_db_config())
+
+
 def get_conn():
     return pool.connection()
 
-# 执行SQL（示例）
-def execute_sql(sql, args=None):
-    conn = None
-    cursor = None
+
+@contextmanager
+def get_cursor():
+    conn = get_conn()
+    cursor = conn.cursor()
     try:
-        conn = get_conn()
-        cursor = conn.cursor()
-        cursor.execute(sql, args)
+        yield cursor
         conn.commit()
-        return cursor.rowcount  # 影响的行数
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        raise e
+        raise
     finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        cursor.close()
+        conn.close()
+
+
+def execute_sql(sql: str, args=None):
+    with get_cursor() as cursor:
+        cursor.execute(sql, args)
+        return cursor.rowcount
+
+
+def selectOne(table_name: str) -> List[Dict]:
+    sql = f"SELECT * FROM {table_name} WHERE last_check IS NULL OR last_check = 0 LIMIT 1"
+    with get_cursor() as cursor:
+        cursor.execute(sql)
+        return cursor.fetchall()
+
+
+def updateOneById(table_name: str, last_check, card: Dict):
+    sql = f"UPDATE {table_name} SET last_check=%s WHERE id=%s"
+    with get_cursor() as cursor:
+        cursor.execute(sql, (last_check, card['id']))
+
+
+def selectCount(table_name: str):
+    sql = f"SELECT COUNT(*) as count FROM {table_name} WHERE last_check IS NULL OR last_check = 0"
+    with get_cursor() as cursor:
+        cursor.execute(sql)
+        return cursor.fetchall()

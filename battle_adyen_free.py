@@ -11,6 +11,7 @@ import execjs
 import utils.operate_mysql as mpool
 import utils.mysqlDao
 import requests
+from utils.config import settings
 
 
 def add_wallet_clearSession(client):
@@ -308,6 +309,25 @@ def adyen_complete(client, xsrf_token, generation_time, ci):
             response.close()
 
 
+def account_add_wallet_add_shop(client, location_url):
+    response = None
+    try:
+        url = location_url
+        headers = {
+            'User-Agent': settings.http_user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+            'Referer': 'https://account.battle.net/',
+        }
+        response = client.get(url, headers=headers, follow_redirects=False)
+        return response.headers.get('Location', '')
+    except Exception as e:
+        logger.error(e)
+        return ""
+    finally:
+        if response is not None:
+            response.close()
+
+
 class checker(threading.Thread):
 
     def __init__(self, threadID):
@@ -328,7 +348,13 @@ class checker(threading.Thread):
             card = None
             acc = None
             try:
-                acc = utils.read_account.read_account()
+                acc = utils.read_account.read_account(source=settings.account_source,
+                                                     fallback_file=settings.account_file)
+                if not acc:
+                    logger.warning("未获取到账号，等待配置完善后重试")
+                    time.sleep(3)
+                    continue
+
                 cookies_str = acc.get('cookies')
                 # split_cookies_str = cookies_str.split('; JSESSIONID=')
                 BA_tassadar_Cookie = acc.get('BA_tassadar_Cookie_lst')
@@ -344,23 +370,17 @@ class checker(threading.Thread):
                 # }
 
                 timeout = httpx.Timeout(timeout=30.0, connect=30.0, read=30.0, write=30.0)
-                # proxy = None
-                #
-                # while True:
-                #     res = requests.get(
-                #         'http://list.rola.vip:8088/user_get_ip_list?token=ZsE0jy8tYNZhotCZ1683190379537&type=datacenter&qty=1&time=5&country=jp&format=json&protocol=socks5&filter=1')
-                #     code = res.json().get('code')
-                #     msg = res.json().get('msg')
-                #     if code == 101:
-                #         ip = msg.replace(" 未加入白名单", "")
-                #         requests.get(
-                #             f"http://api.rola-ip.co/user_add_whitelist?token=ZsE0jy8tYNZhotCZ1683190379537&remark=&ip={ip}")
-                #     elif code == 0:
-                #         proxy = res.json().get('data')[0]
-                #         break
-                #
-                # proxies = f"socks5://{proxy}"
-                # client = httpx.Client(proxies=f'socks5://111.111.111.111:9000', verify=False, cookies=coo, follow_redirects=False, timeout=timeout, http2=True)
+                client_kwargs = dict(
+                    verify=False,
+                    cookies=coo,
+                    follow_redirects=False,
+                    timeout=timeout,
+                    http2=True,
+                )
+                if settings.proxy_url:
+                    client_kwargs['proxy'] = settings.proxy_url
+                client = httpx.Client(**client_kwargs)
+
                 logger.debug(f"THREAD-{self.threadID}: {acc.get('BA_tassadar_Cookie_lst')}")
 
                 location_url_a = add_wallet_clearSession(client)
@@ -431,6 +451,9 @@ class checker(threading.Thread):
                 with tlock.acquire(card_lock):
                     cards = mpool.selectOne(table_name)
                 # threadLock.release()
+                if not cards:
+                    logger.info("卡池为空，等待补充")
+                    break
                 for card in cards:
                     # 提交卡信息
                     ci = dict()
@@ -485,7 +508,11 @@ class checker(threading.Thread):
                 continue
 
             finally:
-                stop_flag = mpool.selectCount(table_name)[0].get('count')
+                try:
+                    stop_flag = mpool.selectCount(table_name)[0].get('count')
+                except Exception as e:
+                    logger.error(f"获取剩余卡量失败: {e}")
+                    stop_flag = 0
                 if client is not None:
                     client.close()
                 time.sleep(random.randint(1, 5))
@@ -498,9 +525,9 @@ if __name__ == '__main__':
     card_lock = threading.Lock()
     live_lock = threading.Lock()
     dead_lock = threading.Lock()
-    table_name = input("输入表名:")
+    table_name = input("输入表名:") or settings.default_table
 
-    num_threads = 30  # 设置线程数量
+    num_threads = 1  # 设置线程数量
 
     threads = []
 
