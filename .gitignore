@@ -1,2 +1,6 @@
 /.idea/
 /log/*.log
+/test.py
+/blizzard_accounts.txt
+/battle_demo.py
+/huya.py
